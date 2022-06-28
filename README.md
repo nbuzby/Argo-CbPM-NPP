@@ -6,7 +6,10 @@ information of implementation, and maybe stuff about directory setups?
 
 ## FUNCTIONS
 ### Main functions (to be called from script or command window):
-list of stuff
+compile_argo()
+extract_sat_data()
+depth_npp()
+surface_npp()
 
 ### Auxilary functions (primarily called by main functions in background):
 list of needs (e.g. BGC argo toolbox)
