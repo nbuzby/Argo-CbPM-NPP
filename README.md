@@ -7,6 +7,7 @@ information of implementation, and maybe stuff about directory setups?
 ## FUNCTIONS
 ### Main functions (to be called from script or command window):
 compile_argo()
+
 extract_sat_data()
 depth_npp()
 surface_npp()
