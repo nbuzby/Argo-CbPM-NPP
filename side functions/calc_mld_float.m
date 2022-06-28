@@ -16,7 +16,7 @@ function [mld, mldmean, mldstd,desc] = calc_mld_float(f, method, mean_calcs, fty
 %   mldmean: structure of MLD averaged variables
 %   mldstd: structure of MLD averaged variable StDevs
 %
-% de Boyer Montégut et al. (2004)
+% de Boyer MontÃ©gut et al. (2004)
 %   'BY' method
 %       0.03 kg/m3 dnesity increase relative to 10m
 %       0.2 C temperature decrease relative to 10m
@@ -102,7 +102,7 @@ for i = 1:length(profile)
         currentidx = p(find(salNaN.*tempNaN.*presNaN >0));
         % Calculate MLD
         if strcmp(method,'BY') == 1
-%             % de Boyer Montégut et al. method:
+%             % de Boyer MontÃ©gut et al. method:
 %             
 %             % Find 10m temperature and 0.2 temperature change
 %             d_10 = interp1(pres,temp,10);
