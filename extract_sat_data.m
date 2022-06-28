@@ -16,6 +16,9 @@ function extract_sat_data(bpath, fpath, satpath, movtspath, float_ids)
 % OUTPUT 
 %   structure 'uf' labeled by float ID of matching satellite data and
 %   associated time/distance from each float profile
+% 
+% Functions called:
+%   pos2dist
 
 %%
 var_str = {'PAR_par','CHL_chlor_a','GSM_bbp_443_gsm','KD490_Kd_490'}; %for file names

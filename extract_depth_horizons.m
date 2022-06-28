@@ -5,7 +5,6 @@ function extract_depth_horizons(fpath, dpath, float_ids)
 % averages data over multiple depth horizons and save each, does not use using est_chla or Mari's bbp
 %
 % Functions called:
-% find_numericID.m
 % calc_od_float.m
 % calc_mld_float.m
 %
