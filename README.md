@@ -5,14 +5,16 @@ Float-implementation of CbPM NPP model
 information of implementation, and maybe stuff about directory setups?
 
 ## FUNCTIONS
-### Main functions (to be called from script or command window):
+### Main functions:
+#### (to be called from script or command window)
 1A  compile_argo.m - downloads and formats float data (SPROF files) for analysis<br/>
 1B  extract_depth_horizons.m - finds and calculates parameter averages for mixed layer depth, optical depth, and euphotic depth<br/>
 1C  extract_sat_data.m - geotemporally matches satellite data with float trajectory and downloads/formats corresponding data<br/>
 2A  npp_depth.m - calculated from float profiles, produces depth-resolved and integrated NPP estimates<br/>
 2B  npp_surface.m - calculated from float or satellite data, only integrated NPP estimates. Requires mixed layer depth data from HYCOM monthly climatology (combined_HYCOM_MLD.mat) and nitrate data from 2018 WOA 1 degree climatology bins (zno3_monthly_clim.mat)
 
-### Auxilary functions (primarily called by main functions in background):
+### Auxilary functions:
+#### (primarily called by main functions in background)
 1A  [BGC-Argo-Mat](https://github.com/NOAA-PMEL/BGC_Argo_Mat_Toolbox) toolbox<br/>
 1B  calc_od_float.m, calc_mld.m, find_mld.m<br/>
 1C  pos2dist.m<br/>
