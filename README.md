@@ -6,11 +6,11 @@ information of implementation, and maybe stuff about directory setups?
 
 ## FUNCTIONS
 ### Main functions (to be called from script or command window):
-1A  compile_argo.m - downloads and formats float data (SPROF files) for analysis
-1B  extract_depth_horizons.m - finds and calculates parameter averages for mixed layer depth, optical depth, and euphotic depth
-1C  extract_sat_data.m - geotemporally matches satellite data with float trajectory and downloads/formats corresponding data
-2A  npp_depth.m - calculated from float profiles, produces depth-resolved and integrated NPP estimates
-2B  npp_surface.m - calculated from float or satellite data, only integrated NPP estimates
+1A  compile_argo.m - downloads and formats float data (SPROF files) for analysis<br/>
+1B  extract_depth_horizons.m - finds and calculates parameter averages for mixed layer depth, optical depth, and euphotic depth<br/>
+1C  extract_sat_data.m - geotemporally matches satellite data with float trajectory and downloads/formats corresponding data<br/>
+2A  npp_depth.m - calculated from float profiles, produces depth-resolved and integrated NPP estimates<br/>
+2B  npp_surface.m - calculated from float or satellite data, only integrated NPP estimates<br/>
     requires HYCOM and ZNO3 data from 
 
 ### Auxilary functions (primarily called by main functions in background):
