@@ -51,7 +51,7 @@ for i=1:length(float_ids)
     uf.profile = f.profile(1,:);
     [prof,~] = unique(f.profile);
    
-	for v=1:length(variables)
+    for v=1:length(variables)
         cd(satpath)
         sat_file = ['Aqua.L3m_8D_' var_str{v} '_4km.nc'];
         disp(['Finding float ',floatID,' ',variables{v},' values'])
@@ -85,7 +85,7 @@ for i=1:length(float_ids)
                 ref = table(var(~isnan(var)),lon_grid(~isnan(lon_grid)),lat_grid(~isnan(lat_grid)),...
                     'VariableNames',{'var_val','lon','lat'}); %eliminates NaN entries
                 ref.closest = abs(ref.lon-f.lon(1,p))+abs(ref.lat-f.lat(1,p));
-                [~,match_idx] = min(ref.closest);
+                [~,match_idx] = min(ref.closest); 
                 match(p) = ref.var_val(match_idx);
                 %save distance difference in km
                 dist.(variables{v})(p) = pos2dist(f.lat(1,p),f.lon(1,p),ref.lat(match_idx),ref.lon(match_idx),1);
@@ -99,5 +99,6 @@ for i=1:length(float_ids)
     uf.match.distance = dist;
     cd(fpath)
 	save([movtspath floatID '.mat'],'uf')
+    clear f uf lat lon time prof duration t_idx var match dist lat_grid lon_grid nandex ref
 end
 
