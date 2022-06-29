@@ -13,11 +13,10 @@ information of implementation, and maybe stuff about directory setups?
 2B npp_surface - calculated from float or satellite data, only integrated NPP estimates
 
 ### Auxilary functions (primarily called by main functions in background):
-1A BGC Argo toolbox<br/>
-1B calc_od_float(), calc_mld(), find_mld()<br/>
-1C pos2dist()
-2A get_doy(), floatCbPM_JSLV3_6(), [AustinPetzold_CBpM2()]
-2B get_doy(), floatCbPM_JSLV3_2_movtsdata(), AustinPetzold_CBpM2()
+1A  BGC Argo toolbox<br/>1B  calc_od_float(), calc_mld(), find_mld()<br/>
+1C  pos2dist()<br/>
+2A  get_doy(), floatCbPM_JSLV3_6(), AustinPetzold_CBpM2()<br/>
+2B  get_doy(), floatCbPM_JSLV3_2_movtsdata(), AustinPetzold_CBpM2()<br/>
 
 plotting - cmocean colormap
 
