@@ -93,8 +93,6 @@ for i = 1:length(float_ids)
     [prof pidx] = unique(f.profile);
     % Call 'f' something else so that we can save as 'f'
     fl = f; clear f
-    %create structure matching PAR variable
-    fl.par = ones(length(fl.profile),width(fl.profile),'single');
     % create variable to list profiles for which can't calc NPP
     bad_profs = 0;
     bad_var = {NaN,NaN};
@@ -298,7 +296,7 @@ for i = 1:length(float_ids)
             
             clearvars -except pp floatID reg f fn fl bad_var mldmean zeumean odmean float_ids...
                 uf prof bad_profs float_files od_files_char col bpath fpath movtspath zvec ...
-                spath ppath bbp_fn1 bbp_fn2 chl_fn plist par_files par_dates grid_lat grid_lon bad_var npath dpath
+                spath ppath bbp_fn1 bbp_fn2 chl_fn plist bad_var npath dpath
             null = 1; %reset null
         end
     end
