@@ -2,7 +2,8 @@
 Float-implementation of CbPM NPP model
 
 ## About 
-information of implementation, and maybe stuff about directory setups?
+information of implementation....
+(file_structure.png)
 
 ## FUNCTIONS
 ### Main functions:
