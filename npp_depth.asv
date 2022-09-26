@@ -100,8 +100,8 @@ for i = 1:length(float_ids)
     
     % Get original fieldnames to use later in interpolation loop
     fn = fieldnames(f);
-    %remove fieldnames that refer to structures/tables or don't need interpolation
-    fn(strcmp(fn,'match')) = ''; fn(strcmp(fn,'sensor_ref')) = ''; fn(strcmp(fn,'par')) = ''; 
+    
+    fn(strcmp(fn,'match')) = {NaN}; fn(strcmp(fn,'sensor_ref')) = NaN;
 
     [prof pidx] = unique(f.profile);
     % Call 'f' something else so that we can save as 'f'

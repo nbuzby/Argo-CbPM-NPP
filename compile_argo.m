@@ -18,7 +18,8 @@ function compile_argo(float_ids, variables, bpath, fpath, plot_vars)
 %% translation keys 
 %Key of variable names in ARGO and the associated output name herein
 %These are the variables needed for NPP calcs
-key1 = {'','TIME','LONGITUDE','LATITUDE','PRES','TEMP','PSAL','CHLA','BBP700','NITRATE'}; 
+key1 = {'','TIME','LONGITUDE','LATITUDE','PRES','TEMP','PSAL','CHLA','BBP700','NITRATE',...
+    'PARAMETER_DATA_MODE'}; 
 %excluding cycle number as profile b/c sometimes have duplicate cycles when different lat/lon
 
 %These are the field names you're going to save them as
@@ -26,16 +27,24 @@ key2 = {'','date','lon','lat','press','temp','sal','chla','bbp700','no3'};
 
 %% Download Argo data
 
+if isa(float_ids, 'cell')
+    for i=1:length(float_ids)
+        float_ids2(i) = str2num(float_ids{i});
+    end
+    clear float_ids; float_ids = float_ids2;
+    clear float_ids2
+end
+
 good_float_ids = download_multi_floats(float_ids);
 
-[Data, Mdata] = load_float_data(good_float_ids, variables);
+[Data, Mdata] = load_float_data(good_float_ids, variables,[],'interp_lonlat','no'); %exclude under ice (interpolated locations)
 floats = fieldnames(Data);
 
 %% Format data and save as structure
 
 %filter out QC flagged values
 [Data_full] = qc_filter(Data,{'PRES';'TEMP';'PSAL';'NITRATE'}, [1,2],...
-    'CHLA',[1,2,5],'BBP700',[1,2,3]);
+    'CHLA',[1,2,5],'BBP700',[1,2,3],'POSITION',1);
 
 for i=1:length(floats)
     fn = floats{i};
@@ -68,14 +77,14 @@ for i=1:length(floats)
                 disp([floatID ' duplicate profile ',num2str(x),' on ', datestr(s.date(1,n))]);
             else
                f.profile(:,n) = repelem(n,rep_leng); 
-               s.profile(:,n) = repelem(n,length(s.date));
+               s.profile(:,n) = repelem(n,height(s.date));
             end
         else %check backwards on final entry
             if isequal(s.date(1,n),s.date(1,n-1)) && s.lat(1,n)== s.lat(1,n-1) && s.lon(1,n)== s.lon(1,n-1)
                 disp([floatID ' duplicate profile ',num2str(x),' on ', datestr(s.date(1,n))]);
             else
                f.profile(:,n) = repelem(n,rep_leng);
-               s.profile(:,n) = repelem(n,length(s.date));
+               s.profile(:,n) = repelem(n,height(s.date));
             end
         end
     end
@@ -116,7 +125,7 @@ for i=1:length(floats)
             end
         end
     end
-    save([fpath '/' floatID '.mat'],'f'); clear s f 
+    save([fpath '/' floatID '.mat'],'-struct','f'); clear s f 
 end
 
 %% Plotting Checks

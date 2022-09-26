@@ -55,7 +55,7 @@ else %if not create list of existing files in downloaded float data directory
 end
 
 %Load the MLD data from HYCOM (3D struct "M" on monthly data)
-load([pp '/input/input_for_sat_comparison/combined_HYCOM_MLD.mat'])
+load([pp '/input/input_for_sat_comparison/HYCOM_MLD_071422.mat'])
 
 %Load the zno3 data from WOA analysis (3D struct "Z" on monthly clims)
 load([pp '/input/input_for_sat_comparison/zno3_monthly_clim.mat'])
@@ -70,9 +70,9 @@ for i = 1:length(float_ids)
     else
         floatID = num2str(float_ids(i));
     end  
-    load([fpath floatID '.mat'],'f'); %Load full profile data ("f" struct)
+    f = load([fpath floatID '.mat']); %Load full profile data ("f" struct)
     load([dpath floatID '_depavg_data.mat']); %Load MLD data ("mldmean" and "mldstd" structs)
-    load([movtspath floatID '.mat']); %Load movTS satellite data ("uf" struct)
+    uf = load([movtspath floatID '.mat']); %Load movTS satellite data ("uf" struct)
     
     [prof profidx] = unique(f.profile);
     %% Loop through Profiles
@@ -98,14 +98,18 @@ for i = 1:length(float_ids)
             daylength = day_length(doy,plat);
         end
         %% MLD
-        if strcmp(platform, 'float') %For float data:
-        % This is Holte & Talley method (also westberry option?)
-            mld = mldmean.mld(p);
-        
-        elseif strcmp(platform, 'sat') % For satellite data:
-        % Get MLD estimate from HYCOM data ('M') & Interpolate to lat lon and date of this profile
-          mld = interp3(M.lon, M.lat, M.date, M.mld, plon, plat, pdate); %NOT WORKING WHEN DATE IS LATE
-        end
+        % 7/25/22 changed to using float MLD b/c HYCOM dataset ends in 2020
+        % MLD found using Holte & Talley method
+        mld = mldmean.mld(p);
+
+%         if strcmp(platform, 'float') %For float data:
+%         % This is Holte & Talley method (also westberry option?)
+%             mld = mldmean.mld(p);
+%         
+%         elseif strcmp(platform, 'sat') % For satellite data:
+%         % Get MLD estimate from HYCOM data ('M') & Interpolate to lat lon and date of this profile
+%           mld = interp3(M.lon, M.lat, M.date, M.mld, plon, plat, pdate); %DOESN'T WORK WHEN FLOAT DATE > HYCOM (see HYCOM_MLD_dataupdate.mat)
+%         end
         %% OD
         od = odmean.od(p);
         zvec = [1:1:round(od)]';
@@ -209,18 +213,18 @@ for i = 1:length(float_ids)
             snpp.lon([1:200],p) = mldmean.lon(p);
             
             %Sensitivity Analysis
-            perturb = {'Chl','bbp','label';1.5,1,'A';2,1,'B';4,1,'C';1,1.5,'A';1,2,'B';1,4,'C'};
-            for b=2:length(perturb)
-                clear out; [out] = floatCbPM_JSLV3_2_movTSdata(mld,Chl*perturb{b,1},bbp*perturb{b,2},k490,zno3,irr,daylength);
-                if b < 5
-                	snpp.inpp.perturb.chl.(perturb{b,3})(p)= out.inpp;
-                else
-                	snpp.inpp.perturb.bbp.(perturb{b,3})(p)=out.inpp;
-                end
-            end
+%             perturb = {'Chl','bbp','label';1.5,1,'A';2,1,'B';4,1,'C';1,1.5,'A';1,2,'B';1,4,'C'};
+%             for b=2:length(perturb)
+%                 clear out; [out] = floatCbPM_JSLV3_2_movTSdata(mld,Chl*perturb{b,1},bbp*perturb{b,2},k490,zno3,irr,daylength);
+%                 if b < 5
+%                 	snpp.inpp.perturb.chl.(perturb{b,3})(p)= out.inpp;
+%                 else
+%                 	snpp.inpp.perturb.bbp.(perturb{b,3})(p)=out.inpp;
+%                 end
+%             end
             
         else %MLD is 0 so not calculating NPP
-            display('MLD = 0 or ODchl = NaN');
+            disp([floatID ' profile ' num2str(p) ', MLD = 0 or ODchl = NaN']);
             null = 0;
         end
         
@@ -246,7 +250,7 @@ for i = 1:length(float_ids)
     end
     %% Save npp data
     isfolder(npath);
-    save([npath floatID '_' platform '_surface_CbPM.mat'],'snpp');
+    save([npath floatID '_' platform '_surface_CbPM.mat'],'-struct','snpp');
     
     clear snpp mldmean mldstd floatID od_files_char odmean odstd profile_num
 end

@@ -41,7 +41,7 @@ for i = 1:length(float_ids)
     else
         floatID = num2str(float_ids(i));
     end  
-    load([fpath floatID '.mat'],'f')
+    f = load([fpath floatID '.mat']);
     
     %Roesler correction
     %['Chl was mult by two to remove the Roesler correction']};
