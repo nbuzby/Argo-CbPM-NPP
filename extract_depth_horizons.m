@@ -43,34 +43,24 @@ for i = 1:length(float_ids)
     end  
     f = load([fpath floatID '.mat']);
     
-    %Roesler correction
-    %['Chl was mult by two to remove the Roesler correction']};
-    f.chla = f.chla.*2;
+%     %Roesler correction
+%     %['Chl was mult by two to remove the Roesler correction']};
+%     f.chla = f.chla.*2;
+%     chla =f.chla;
+%     save([fpath '/' floatID '.mat'],'chla','-append')
     
     %%Extract depth averaged data
-    [mld, mldmean, mldstd, desc] = calc_mld_float(f,'HT',1,'Argo'); %using Holte & Talley MLD method
-    nandex = find(isnan(mldmean.mld));
-    %calc_mld fills NaN mld entries with 0 values --> replacing
-    var_1=fieldnames(mldmean);
-    for v=1:length(var_1)
-        mldmean.(var_1{v})(nandex) = NaN;
-    end
-    var_2=fieldnames(mldstd);
-    for v=1:length(var_2)
-        mldstd.(var_2{v})(nandex) = NaN;
-    end
+    [mldmean, mldstd] = calc_mld_float(f,'BY','N'); %using Holte & Talley MLD method
     
     %%Calculate OD and Zeu
     if f.lon(1)<0
         f.lon = f.lon+360; %od calculations don't work with negative values
     end
     [odmean,odstd,zeumean,zeustd] = calc_od_float(f,mldmean);
-    
-    desc.info = {['MLD method used = HT'];...
-        ['Kd used in Zeu and OD calculations = KdPAR'];...
-        ['Date processed = ' char(datetime)];...
-        ['poc_v2 calc using bbp_tot and Johnson et al 2017 relationship']};%...
-    save([dpath '/' floatID '_depavg_data.mat'],'mldmean','mldstd','odmean','odstd','zeumean','zeustd','desc')
-    
-    clear f mldmean mldstd float_no zeumean zeustd vars odmean odstd
+    if isfile([dpath '/' floatID '_depavg_data.mat'])
+        save([dpath '/' floatID '_depavg_data.mat'],'mldmean','mldstd','odmean','odstd','zeumean','zeustd','-append')
+    else
+        save([dpath '/' floatID '_depavg_data.mat'],'mldmean','mldstd','odmean','odstd','zeumean','zeustd')
+    end
+    clear f mldmean mldstd zeumean zeustd odmean odstd
 end

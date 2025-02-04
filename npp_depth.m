@@ -1,4 +1,4 @@
-function float_npp_depth(dpath, fpath, movtspath, npath, float_ids, chl_correction)
+function npp_depth(dpath, fpath, npath, float_ids, chl_correction,par_data)
 %%-------------------------------------------------------------------------
 %
 % Filename:				get_npp_from_argo.m
@@ -39,6 +39,10 @@ function float_npp_depth(dpath, fpath, movtspath, npath, float_ids, chl_correcti
 %   chl_correction: determine whether to use original float chlorophyll
 %                   values or satellite-corrected values (Y/N). if not
 %                   included will use corrected values
+%   par_data:       choose what PAR data source to use: satellite matchup
+%                   (sat), depth resolved ML product from Herve's group
+%                   (prod), or float radiometer data (float).
+%                   if not included will use satellite matchup
 %
 % OUTPUT:
 %   will save calculated NPP as a structure, labeld with float ID
@@ -54,22 +58,16 @@ function float_npp_depth(dpath, fpath, movtspath, npath, float_ids, chl_correcti
 % floatCbPM_JSLV3_6
 %
 %% --------------------------------------------------------------------------
-% Define input chl and bbp fields
-bbp_fn1 = 'bbp700';
-bbp_fn2 = bbp_fn1;
-
-if chl_correction == 'Y'
-    chl_fn = 'chla_corr';
-else
-    chl_fn = 'chla';
-end
-
 % Load data
 %are float ids specified? and should corrected chlorophyll be used?
-if nargin > 5
+
+if nargin < 6
+    par_data = 'sat';
+elseif nargin < 5
     chl_correction = 'Y';
-elseif nargin > 4
-else %if not create list of existing files in downloaded float data directory
+    par_data = 'sat';
+elseif nargin < 4
+    %if not create list of existing files in downloaded float data directory
     cd(fpath)
     flist = dir('*.mat');
     float_files = {flist.name};
@@ -77,14 +75,24 @@ else %if not create list of existing files in downloaded float data directory
         od_files_char = char(float_files(i));
         float_ids{i} = od_files_char(1:7);
     end
+    chl_correction = 'Y';
+    par_data = 'sat';
+end
+
+% Define input chl field
+if chl_correction == 'Y'
+    chl_fn = 'chla_corr';
+else
+    chl_fn = 'chla';
 end
 
 %% --------------------------    Program start   --------------------------
 %                 No modifications should be made below this line
 %--------------------------------------------------------------------------
 
-zvec = [1:1:200];
+zvec = 1:1:200;
 null = 1;
+perturb = {'Chl','bbp','par','label';1.5,1,1,1;2,1,1,2;4,1,1,3;1,1.5,1,1;1,2,1,2;1,4,1,3;1,1,1.5,1;1,1,2,2;1,1,4,3};
 
 %% Loop through floats
 for i = 1:length(float_ids)
@@ -95,137 +103,91 @@ for i = 1:length(float_ids)
     end  
    
     % Load Data
-    load([dpath floatID '_depavg_data.mat']) %Load MLD data, mldmean struct
+    load([dpath floatID '_depavg_data.mat'],'odmean','zeumean') %Load dep-avged data (mld, od, zeu structs)
     f = load([fpath floatID '.mat']); %Load full profile data, f struct
     
-    % Get original fieldnames to use later in interpolation loop
-    fn = fieldnames(f);
-    %remove fieldnames that refer to structures/tables or don't need interpolation
-    fn(strcmp(fn,'match')) = ''; fn(strcmp(fn,'sensor_ref')) = ''; fn(strcmp(fn,'par')) = ''; 
-
-    [prof pidx] = unique(f.profile);
+    prof = 1:width(f.profile);
     % Call 'f' something else so that we can save as 'f'
     fl = f; clear f
-    % create variable to list profiles for which can't calc NPP
-    bad_profs = 0;
-    bad_var = {NaN,NaN};
+
     %% Loop through Profiles
     for p = 1:length(prof)
-        % Get index of current profile
-        current_idx = find(fl.profile == prof(p));
-        
-        if isempty(find(~isnan(fl.press(current_idx)), 1))
+        if isempty(find(~isnan(fl.press(:,p)), 1))
             warning('%s has empty pressure values for profile %s',...
                 floatID, num2str(prof(p)))
+            f.date_vec(:,p) = odmean.date(p);
+            f.inpp.date(p,1) = odmean.date(p);
+            f.inpp.mld(p,1) = mld;
+            f.inpp.od(p,1) = odmean.od(p);
+            f.inpp.zeu(p,1) = zeumean.zeu(p);
+            f.bad_var(p,:) = {prof(p),'press'};
         else
-            %% PAR / IRR
-            %using float-matched satellite PAR values
-            clear irr; irr = fl.par(p);
-            clear par;
+            %% Define Input Variables for CbPM
+            [~, ~, ~, doy] = get_doy(odmean.date(p));
+            clear posvec; posvec = [odmean.lat(p), odmean.lon(p)]; %Position Vector
             
-            %% Position Vector
-            [~, moidx, ~, doy] = get_doy(odmean.date(p));
-            clear posvec; posvec = [odmean.lat(p), odmean.lon(p)];
-
-            %% MLD
-            mld = mldmean.mld(p);
-
-            %% OD
-            od = odmean.od(p);
-
-            %% Chl
-            % Extrapolate the shallowest value to get a surface estimate
-            clear CHLsurf_idx; CHLsurf_idx = find(~isnan(fl.(chl_fn)(current_idx)),1);
-            if isempty(CHLsurf_idx) %then the whole profile is NaN
-                Chl = NaN;
+            if strcmp(par_data,'sat') && length(fl.par)>1
+                clear irr; irr = fl.par(p); %using float-matched satellite PAR values
+            elseif strcmp(par_data,'prod')
+                clear irr; irr = fl.PAR_prod(1:200,p); %using ML PAR product from Renosh et al., 2023 (DOI: 10.3390/rs15245663)
+                irr(irr<0)=NaN;
+            elseif strcmp(par_data,'float')
+                clear irr; irr = fl.irr_int(1:200,p);
+                irr(irr<0)=NaN;
             else
-                % Add it to chl vector
-                clear tmp; tmp = [fl.(chl_fn)(current_idx(CHLsurf_idx));fl.(chl_fn)(current_idx)];
-                nandex = ~isnan(fl.press(current_idx));
-                tmpP = [fl.press(current_idx(nandex)); 1];
-                % Sample points must be unique and ascending...
-                [tmpP,uidx] = unique(tmpP);
-                clear tmpidx; tmpidx = find(~isnan(tmp(uidx)));
-                if length(tmpP(tmpidx)) < 2 || length(tmp(uidx(tmpidx))) < 2
-                    Chl = NaN;
-                else
-                    Chl = interp1(tmpP(tmpidx), tmp(uidx(tmpidx)),zvec);
-                    Chl(Chl < 0) = 0;
-                end
+                irr = NaN;
             end
-            
-            %% Bbp
-            % Extrapolate the shallowest value to get a surface estimate
-            clear BBPsurf_idx; BBPsurf_idx = find(~isnan(fl.(bbp_fn1)(current_idx)),1);
-            if isempty(BBPsurf_idx) %then the whole profile is NaN
-                bbp = NaN;
-            elseif isnan(nansum(fl.(bbp_fn2)(current_idx)))
-                bbp = NaN;
-            else
-                clear BBPsurf_val; BBPsurf_val = fl.(bbp_fn1)(current_idx(BBPsurf_idx));
-                % Add it to bbp vector
-                clear tmp; tmp = [fl.(bbp_fn2)(current_idx);BBPsurf_val];
-                if ~exist('uidx','var') %if empty Chl profile, need to establish unique/ascending order
-                    nandex = ~isnan(fl.press(current_idx));
-                    tmpP = [fl.press(current_idx(nandex)); 1];
-                    [tmpP,uidx] = unique(tmpP);
-                end
-                clear tmpidx; tmpidx = find(~isnan(tmp(uidx))); %uidx refers to pressure values from Chl calcs
-                if length(tmpidx) < 2
-                    bbp = NaN;
-                else
-                    bbp700 = interp1(tmpP(tmpidx), tmp(uidx(tmpidx)),zvec); %tmpP also refers to previous press values
-                    %Calculate bbp 470 from 700 > if using Graff relationship >
-                    %this needs to also be modified in the calculationg of NPP
-                    %function below
-                    %             bbp = bbp700.*(470/700).^-1;  %Assume lambda^-1 dependence of scattering
-                    %Calculate bbp 443 from 700 > if using CbPM (Behrenfeld) relationship
-                    bbp = bbp700.*(443/700).^-1;  %Assume lambda^-1 dependence of scattering
-                end
-            end
-            %% Kd
-            % Using OD-averaged Chl
+
+            mld = fl.mld(1,p); 
+            od = odmean.od(p); 
+            Chl = fl.(chl_fn)(1:200,p); Chl(isnan(Chl)) = 0; %can't have NaNs at surface
+            bbp = fl.bbp700(1:200,p).*(443/700).^-1; bbp(isnan(bbp)) = 0; %Calculate bbp 443 from 700 > if using CbPM (Behrenfeld) relationship (Assume lambda^-1 dependence of scattering)
+        
+            %Kd (Using OD-averaged Chl)
             if isnan(Chl)
                 k490=NaN;
             else
-                k490 = 0.0166 + 0.0773.*(nanmean(Chl(find(zvec < od)))).^0.6715;  %Morel et al. 2007 Eq. 8 empirical fit to NOMAD + LOV data
+                k490 = 0.0166 + 0.0773.*(nanmean(Chl(zvec < od))).^0.6715;  %Morel et al. 2007 Eq. 8 empirical fit to NOMAD + LOV data
                 k490(k490<0.0224) = 0.0224;  % Kd490 can't be less than pure-water minimum; Austin & Petzold, L&W Table 3.16
             end
 
             %% CALCULATE NPP
-
-            % To save as original float 'f' structure size
-            pp = p;
-            % Add surface value to pressure
-            new_press = [fl.press(current_idx)];
-            % Need to add a data point for the index
-            new_idx = [current_idx(1)+(p - 1):1:current_idx(end)+p];
-
-            if (mld > 0) && nansum(Chl)>0 && ~isnan(irr) && ~isnan(k490)...
+            if (mld > 0) && nansum(Chl)>0 && nansum(irr)>0 && ~isnan(k490)...
                     && nansum(bbp)>0 && ~isnan(sum(posvec))
                 
                 % Estimate NPP using CbPM code:
-                clear out; [out] = floatCbPM_JSLV3_6(mld,Chl,bbp,k490,irr,posvec,doy,zvec,od);
+                if strcmp(par_data,'sat')
+                    clear out; [out] = floatCbPM_JSLV3_6(mld,Chl,bbp,k490,irr,posvec,doy,zvec,od);
+                elseif strcmp(par_data,'prod') || strcmp(par_data,'float')
+                    clear out; [out] = floatCbPM_JSLV3_6_PARZ(Chl,bbp,irr,posvec,doy,zvec,od);
+                end
                 % Log parameters to save to float structure
-                % Make changes here if you want to change how the output is saved (e.g., if
-                % you want it to be save like the float data is
-                f.npp_vec(:,pp) = interp1(zvec,out.ppz,new_press);
-                f.mu(:,pp) = interp1(zvec,out.mu,new_press);
-                f.chlz(:,pp) = interp1(zvec,Chl,new_press);
-                f.PhytC(:,pp) = interp1(zvec,out.carbon,new_press);
-                f.ChlC(:,pp) = interp1(zvec,out.chl_C,new_press);
-                f.Igrid(:,pp) = interp1(zvec,out.parz,new_press);
-                f.prcnt(:,pp) = interp1(zvec,out.prcnt,new_press);
+                f.npp_vec(:,p) = out.ppz;
+                f.parz(:,p) = out.parz;
+                f.mu(:,p) = out.mu;
+                f.chlz(:,p) = Chl;
+                f.PhytC(:,p) = out.carbon;
+                f.ChlC(:,p) = out.chl_C;
+                f.Igrid(:,p) = out.parz;
+                f.prcnt(:,p) = out.prcnt;
                 f.inpp.intNPP(p,1) = out.inpp;
+                f.bad_var(p,:) = {prof(p),'None'};
                 
                 %Sensitivity Analysis
-                perturb = {'Chl','bbp','label';1.5,1,'A';2,1,'B';4,1,'C';1,1.5,'A';1,2,'B';1,4,'C'};
                 for b=2:length(perturb)
-                        clear out; [out] = floatCbPM_JSLV3_6(mld,Chl*perturb{b,1},bbp*perturb{b,2},k490,irr,posvec,doy,zvec,od);
-                        if b < 5
-                            f.inpp.perturb.chl.(perturb{b,3})(p,1)= out.inpp;
-                        else
-                            f.inpp.perturb.bbp.(perturb{b,3})(p,1)=out.inpp;
+                    if strcmp(par_data,'sat')
+                        clear out; [out] = floatCbPM_JSLV3_6(mld,Chl*perturb{b,1},bbp*perturb{b,2},k490,irr*perturb{b,3},posvec,doy,zvec,od);
+                    elseif strcmp(par_data,'prod')
+                        clear out; [out] = floatCbPM_JSLV3_6_PARZ(Chl*perturb{b,1},bbp*perturb{b,2},irr*perturb{b,3},posvec,doy,zvec,od);
+                    end
+                    
+                    out.inpp(out.inpp==0) = NaN;
+                    if b < 5
+                        f.inpp.perturb.chl(p,perturb{b,4})= out.inpp;
+                    elseif b>4 && b<8
+                        f.inpp.perturb.bbp(p,perturb{b,4})=out.inpp;
+                    else
+                        f.inpp.perturb.par(p,perturb{b,4})=out.inpp;
                     end
                 end
 
@@ -234,7 +196,7 @@ for i = 1:length(float_ids)
                 if ~nansum(Chl)>0
                     f.bad_var(p,:) = {prof(p),'Chl'};
                 elseif isnan(irr)
-                    f.bad_var(p,:) = {prof(p),'irr'};
+                    f.bad_var(p,:) = {prof(p),['irr_' par_data]};
                 elseif isnan(k490)
                     f.bad_var(p,:) = {prof(p),'kd490'};
                 elseif ~nansum(bbp)>0
@@ -246,81 +208,73 @@ for i = 1:length(float_ids)
                         f.bad_var(p,:) = {prof(p),'sal'};
                     elseif ~nansum(fl.temp(:,p))
                         f.bad_var(p,:) = {prof(p),'temp'};
+                    else
+                        f.bad_var(p,:) = {prof(p),'MLD'};
                     end
                 else
                     f.bad_var(p,:) = {prof(p),'something else'};
-                end   
-                disp(['For float ' floatID ' profile ' num2str(prof(p)) ' one of the input vars is NaN - ',char(f.bad_var(p,2))]);
+                end
+                %disp(['For float ' floatID ' profile ' num2str(prof(p)) ' one of the input vars is NaN - ',char(f.bad_var(p,2))]);
                 null = 0;
             end
             if null == 0 %then set to NaN for this profile
-                rep_len = length(fl.date);
-                f.prof_check(:,pp) = NaN*ones(rep_len,1);
-                f.npp_vec(:,pp) = NaN*ones(rep_len,1);
-                f.mu(:,pp) = NaN*ones(rep_len,1);
-                f.chlz(:,pp) = NaN*ones(rep_len,1);
-                f.PhytC(:,pp) = NaN*ones(rep_len,1);
-                f.ChlC(:,pp) = NaN*ones(rep_len,1);
-                f.Igrid(:,pp) = NaN*ones(rep_len,1);
-                f.prcnt(:,pp) = NaN*ones(rep_len,1);
+                rep_len = length(zvec);
+                f.prof_check(:,p) = NaN*ones(rep_len,1);
+                f.npp_vec(:,p) = NaN*ones(rep_len,1);
+                f.parz(:,p) = NaN*ones(rep_len,1);
+                f.mu(:,p) = NaN*ones(rep_len,1);
+                f.chlz(:,p) = NaN*ones(rep_len,1);
+                f.PhytC(:,p) = NaN*ones(rep_len,1);
+                f.ChlC(:,p) = NaN*ones(rep_len,1);
+                f.Igrid(:,p) = NaN*ones(rep_len,1);
+                f.prcnt(:,p) = NaN*ones(rep_len,1);
                 f.inpp.intNPP(p,1) = NaN;
                 
                 %add NaN into perturbation vectors as well
-                f.inpp.perturb.chl.A(p,1) = NaN;
-                f.inpp.perturb.chl.B(p,1) = NaN;
-                f.inpp.perturb.chl.C(p,1) = NaN;
-                f.inpp.perturb.bbp.A(p,1) = NaN;
-                f.inpp.perturb.bbp.B(p,1) = NaN;
-                f.inpp.perturb.bbp.C(p,1) = NaN;
-            else
+                f.inpp.perturb.chl(p,:) = NaN;
+                f.inpp.perturb.bbp(p,:) = NaN;
+                f.inpp.perturb.par(p,:) = NaN;
             end
-            f.date_vec(:,pp) = odmean.date(p);
-            f.inpp.date(p,1) = odmean.date(p);
-            f.inpp.mld(p,1) = mld;
-            f.inpp.od(p,1) = odmean.od(p);
-            f.inpp.zeu(p,1) = zeumean.zeu(p);
-            
-            % Loop through the original float fields to make the profiles line
-            % up - this will just add a NaN value for alot these variables
-            % at the surface but could change to "surface most"
-            for k = 1:length(fn)
-                current_var = char(fn(k));
-                if isnan(nansum(fl.(current_var)(current_idx)))
-                    f.(current_var)(:,pp) = NaN;
-                else
-                    if strcmp(current_var,'profile') || strcmp(current_var,'date') || strcmp(current_var,'lon') || strcmp(current_var,'lat')
-                        f.(current_var)(:,pp) = fl.(current_var)(current_idx(1));
-                    elseif strcmp(current_var,'press')
-                        f.(current_var)(:,pp) = new_press;
-                    else
-                         % Sample points must be unique and ascending...
-                        nandex = ~isnan(fl.press(current_idx));
-                        clear tmpP uidx; [tmpP,uidx] = unique(fl.press(current_idx(nandex)));
-                        clear tmp; tmp = fl.(current_var)(current_idx);
-                        clear tmpidx; tmpidx = find(~isnan(tmp(uidx)));
-                        if length(tmpidx) < 2 % If this profile of data doesn't have enough ~isnan values
-                            f.(current_var)(:,pp) = nan(length(new_press),1);
-                        else
-                            f.(current_var)(:,pp) = interp1(tmpP(tmpidx),tmp(uidx(tmpidx)),new_press);
-                        end
-                    end
-                end
-            end
-
-            %check_struct(f, {})
-            
-            clearvars -except pp floatID reg f fn fl bad_var mldmean zeumean odmean float_ids...
-                uf prof bad_profs float_files od_files_char col bpath fpath movtspath zvec ...
-                spath ppath bbp_fn1 bbp_fn2 chl_fn bad_var npath dpath
-            null = 1; %reset null
         end
+        f.date_vec(p) = odmean.date(1,p);
+        f.inpp.date(p,1) = odmean.date(1,p);
+        f.inpp.mld(p,1) = mld;
+        f.inpp.od(p,1) = odmean.od(p);
+        f.inpp.zeu(p,1) = zeumean.zeu(p);
+        f.press(:,p) = zvec;
+        f.chl(:,p) = Chl;
+        f.bbp(:,p) = bbp;
+
+        
+        clearvars -except floatID f fn fl bad_var mldmean zeumean odmean float_ids...
+            uf prof bad_profs float_files od_files_char col bpath fpath movtspath zvec ...
+            spath ppath bbp_fn1 bbp_fn2 chl_fn bad_var npath dpath perturb chl_correction par_data
+        null = 1; %reset null
     end
     % Find latest float data to log
     f.info = {['Float ID: ' floatID]; ...
         ['Data processed on ' datestr(now)]; ...
-        ['Float data time range = ' datestr(min(odmean.date)) ' to ' datestr(max(odmean.date))]};
+        ['Float data time range = ' datestr(min(min(odmean.date))) ' to ' datestr(max(max(odmean.date)))]};
 
     % Save npp data
-    save([npath floatID '_CbPM.mat'],'-struct','f');
+    if chl_correction == 'Y'
+        chl_corr = '';
+    elseif chl_correction == 'N'
+        chl_corr = '_uncorrected';
+    end
+    if strcmp(par_data,'prod')
+        par_name = '_parproduct';
+    elseif strcmp(par_data,'sat')
+        par_name = '';
+    elseif strcmp(par_data,'float')
+        par_name = 'float_rad';
+    end
+    filename = ['_CbPM' chl_corr par_name];
+    
+    if isfile(filename)
+        save([npath floatID filename],'-struct','f','-append'); 
+    else 
+        save([npath floatID filename],'-struct','f');
+    end
 end
 

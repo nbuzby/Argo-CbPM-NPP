@@ -1,6 +1,6 @@
-function extract_sat_data(bpath, fpath, satpath, movtspath, float_ids)
+function extract_sat_data(pp,latlim,lonlim, fpath, satpath, movtspath, float_ids)
 % extract_sat_data(bpath, fpath, satpath, movtspath)
-% finds and __ satellite data associated with float paths
+% finds and pulls satellite data associated with float paths
 %
 %
 % INPUT VARIABLES:
@@ -22,13 +22,15 @@ function extract_sat_data(bpath, fpath, satpath, movtspath, float_ids)
 % Functions called:
 %   pos2dist
 
-%%
-var_str = {'chlor_a','par','GSM_bbp_443_gsm','Kd_490'}; %for file names
-variables = {'chlor_a','par','bbp_443_gsm','Kd_490'}; %for folder paths
-platform = {'uf','f'}; %PAR-based matchup should be saved to float structure, Chl-based matchup saved to sat structure
-thresholds = [21,36];
+%% Setup
+cd([pp '/input/input_for_sat_comparison'])
+zonal = ncread('sat_chl_variability.nc','zonal_med'); 
+z_lat = ncread('sat_chl_variability.nc','z_lat'); z_lon = ncread('sat_chl_variability.nc','z_lon');
+meridional = ncread('sat_chl_variability.nc','meridional_med'); 
+m_lat = ncread('sat_chl_variability.nc','m_lat'); m_lon = ncread('sat_chl_variability.nc','m_lon');
+variables = {'chlor_a','par','bbp_443','Kd_490'}; %for folder paths
 
-if nargin >4 %are float ids or thresholds specified?
+if nargin >3 %are float ids or thresholds specified?
 else
     %create list of existing files in downloaded float data directory
     cd(fpath)
@@ -36,13 +38,27 @@ else
     float_files = {flist.name};
     for i=1:length(float_files)
         od_files_char = char(float_files(i));
+        float_ids{i} = od_files_char(1:7);
     end 
 end
 
-lonlim = [-90 0]; 
-latlim = [0 75];
+%Establish *filled* interpolant products from surfaces for matchup distance lookup
+[x,y] = ndgrid(m_lon,m_lat); Fy = griddedInterpolant(x,y,fillmissing2(meridional,'nearest'),'linear','none');
+[x,y] = ndgrid(z_lon,z_lat); Fx = griddedInterpolant(x,y,fillmissing2(zonal,'nearest'),'linear','none');
+clear x y
 
 %% Extract & match sat data
+%universal sat data dimensions
+cd(satpath)
+lat = ncread('Aqua.L3m_8D_chlor_a_4km.nc','lat'); 
+lon = ncread('Aqua.L3m_8D_chlor_a_4km.nc','lon');
+time = ncread('Aqua.L3m_8D_chlor_a_4km.nc', 'time')+719529; %netcdf is in days since 1970-01-001
+
+% for v=1:length(variables)
+%     time = ncread(['Aqua.L3m_8D_' variables{v} '_4km.nc'], 'time')+719529; %netcdf is in days since 1970-01-001
+%     disp([variables{v} ' time length = ' num2str(length(time)) ' ' datestr(time(end))])
+% end
+
 for i=1:length(float_ids)
     if isa(float_ids, 'cell') %floats are listed in cell array if taken from directory
         floatID = char(float_ids(i));
@@ -56,102 +72,69 @@ for i=1:length(float_ids)
     uf.profile = f.profile(1,:);
     uf.date = f.date(1,:);
     [prof,~] = unique(f.profile);
+    for v=1:length(variables)
+        uf.(variables{v}) = NaN(size(uf.profile));
+        if v==1
+            uf.match.lat = NaN(size(uf.profile));
+            uf.match.lon = NaN(size(uf.profile));
+            uf.match.Ly = NaN(size(uf.profile));
+            uf.match.Lx = NaN(size(uf.profile));
+        end
+    end
     
     disp(['Finding float ',floatID,' matchups'])
+    %fprintf(1,['Finding float ',floatID,' matchups'],prog);
    
-    for v=1:length(variables)
-        cd(satpath)
-        if v==3 %bbp data have not undergone 2022 processing
-            cd([satpath '/Release_2018.1QL'])
-        end
-        sat_file = ['Aqua.L3m_8D_' var_str{v} '_4km.nc'];
-        
-        %establish lat/lon bounding box for float to speed variable ncread
-        lat = ncread(sat_file,'lat');
-        [~,lat_idx1] = min(abs(lat-latlim(1))); 
-        [~,lat_idx2] = min(abs(lat-latlim(2)));
-        lat = flipud(lat(lat_idx1:lat_idx2-1)); %flip so array organized high-low 
-        
-        lon = ncread(sat_file,'lon'); 
-        [~,lon_idx1] = min(abs(lon-lonlim(1))); 
-        [~,lon_idx2] = min(abs(lon-lonlim(2)));
-        lon = lon(lon_idx1:lon_idx2-1);
+    for p = 1:length(prof)
+        %find date of closest time-aligned composite file
+        [duration,t_idx] = min(abs((time+4) - f.date(1,p))); %add 4 to time-center 8-day composite
+        %save time difference
+        uf.match.time(p) = duration;
+        uf.match.date(p) = time(t_idx);
 
-        [lat_grid, lon_grid] = ndgrid(lat,lon);
-        deg_dist = abs(lat(2)-lat(1)); %distance in degrees between grid points
+        if ~isnan(f.lat(1,p)) && ~isempty(t_idx) %only matchup for geolocated/time aligned profiles
+            %% geographic match-up
+            %get rectangle region sat_chl surfaces            
+            Ly = floor(Fy(f.lon(1,p),f.lat(1,p))); %meridional surface lookup
+            Lx = floor(Fx(f.lon(1,p),f.lat(1,p))); %zonal surface lookup
+            uf.match.Ly(p) = Ly;
+            uf.match.Lx(p) = Lx;
 
-        time = ncread(sat_file, 'time')+719529; %netcdf is in days since 1970-01-001
-        
-        for p = 1:length(prof)
-            if v==1 || v==2 %only matchup PAR & Chl
-                %find date of closest time-aligned composite file
-                [duration,t_idx] = min(abs((time+4) - f.date(1,p))); %add 4 to time-center 8-day composite
-                %save time difference
-                eval([platform{v} '.match.time(p) = duration;'])
-                eval([platform{v} '.match.date(p) = time(t_idx);'])
+            if ~isnan(Ly) && ~isnan(Lx) %need finite distances
+                %find associated indices
+                [~,lat_idx] = min(abs(lat-f.lat(1,p)));
+                [~,lon_idx] = min(abs(lon-f.lon(1,p)));
+                [lat_grid,lon_grid] = ndgrid(lat(lat_idx-Ly:lat_idx+Ly),lon(lon_idx-Lx:lon_idx+Lx));
     
-                %larger matrix of satellite data from time-asligned composite
-                var=flipud(ncread(sat_file,variables{v},[lon_idx1,lat_idx1,t_idx],[length(lon),length(lat),1])');
-                
-                if nansum(var,'all')== 0 || isnan(f.lat(1,p)) %no data found within region or profile not geolocated
-                    eval([platform{v} '.' variables{v} '(p) = NaN;'])
-                    eval([platform{v} '.match.distance.km(p) = NaN;'])
-                    eval([platform{v} '.match.distance.vert(p) = NaN;'])
-                    eval([platform{v} '.match.distance.horz(p) = NaN;'])
-                    eval([platform{v} '.match.lat(p) = NaN;'])
-                    eval([platform{v} '.match.lon(p) = NaN;'])
-                else
-                    %% geographic match-up
-                    nandex = find(~isnan(var));
-                    ref = table(var(nandex),lon_grid(nandex),lat_grid(nandex),...
-                        'VariableNames',{'var_val','lon','lat'}); 
-    
-                    ref.closest = posdist(ref.lat,ref.lon,f.lat(1,p),f.lon(1,p),'s'); %great circle distance in km
-                    ref.grid_lat = abs(ref.lat-f.lat(1,p))/deg_dist; %determine "grid-point" distance to work with autcorrelation threshold definition
-                    ref.grid_lon = abs(ref.lon-f.lon(1,p))/deg_dist;
-
-                    ref.closest(find(abs(ref.grid_lat) >thresholds(1))) = NaN; %vert autocorr threshold
-                    ref.closest(find(abs(ref.grid_lon) >thresholds(2))) = NaN;%horz autocorr threshold
-
-                    [val,match_idx] = min(ref.closest); 
-                    if isnan(val) %no measurements within threshold
-                        eval([platform{v} '.' variables{v} '(p) = NaN;'])
-                        eval([platform{v} '.match.distance.km(p) = NaN;'])
-                        eval([platform{v} '.match.distance.vert(p) = NaN;'])
-                        eval([platform{v} '.match.distance.horz(p) = NaN;'])
-                        eval([platform{v} '.match.lat(p) = NaN;'])
-                        eval([platform{v} '.match.lon(p) = NaN;'])
-                    else
-                        eval([platform{v} '.' variables{v} '(p) = ref.var_val(match_idx);'])
-                        
-                        %save distance difference in km,grid points, and associated lat/lon positions
-                        eval([platform{v} '.match.distance.km(p) = val;'])
-                        eval([platform{v} '.match.distance.vert(p) = ref.grid_lat(match_idx);'])
-                        eval([platform{v} '.match.distance.horz(p) = ref.grid_lon(match_idx);'])
-                        
-                        eval([platform{v} '.match.lat(p) = ref.lat(match_idx);'])
-                        eval([platform{v} '.match.lon(p) = ref.lon(match_idx);'])
+                for v=1:length(variables)
+                    %read in sat data from region
+                    var = ncread(['Aqua.L3m_8D_' variables{v} '_4km.nc'],variables{v},[lon_idx-Lx lat_idx-Ly t_idx],[2*Lx+1 2*Ly+1 1]); 
+                    if sum(~isnan(var),'all') > 0 %have >0 measurement within threshold
+                        uf.(variables{v})(1:((2*Ly+1)*(2*Lx+1)),p) = var(:);
+                        if v==1 %only need to save locations once
+                            %save associated lat/lon positions
+                            uf.match.lat(1:((2*Ly+1)*(2*Lx+1)),p) = lat_grid(:);
+                            uf.match.lon(1:((2*Ly+1)*(2*Lx+1)),p) = lon_grid(:);
+                        end
                     end
-    
                 end
             end
         end
-        if v==3 || v==4 || v==2 %use Chl matchup for Kd,bbp,and sat-PAR
-            ref_date = uf.match.date(p);
-            t_idx = find(time==ref_date);
-
-            var=flipud(ncread(sat_file,variables{v},[lon_idx1,lat_idx1,t_idx],[length(lon),length(lat),1])');
-            %grid indices for matchup lat/lon
-            [~,lat_idx] = min(abs(lat-uf.match.lat)); 
-            [~,lon_idx] = min(abs(lon-uf.match.lon));
-            %call associated variable values
-            uf.(variables{v}) = var(sub2ind(size(var),lat_idx,lon_idx)); %sub2ind turns coordinate index values to linear index values
-        end
     end
+    %nan out zeros from varying length arrary addtions
+    for v=1:length(variables)
+        uf.(variables{v})(uf.(variables{v})==0) = NaN;
+    end
+    uf.match.lat(uf.match.lat==0) = NaN;
+    uf.match.lon(uf.match.lon==0) = NaN;
+    if height(uf.par>1)
+        f.par = mean(uf.par,'omitnan'); %save to regular float structure for npp calcs, and precalc mean
+    end
+    
     disp('...done!')
-
-	save([movtspath floatID '.mat'],'-struct','uf')
+    save([movtspath floatID '.mat'],'-struct','uf')
     save([fpath floatID '.mat'],'-struct','f','-append')
-    clear f uf prof duration t_idx var match ref_lat ref_lon  nandex ref
+
+    clear f uf prof duration t_idx var lat_idx lon_idx Ly Lx lat_grid lon_grid
 end
 

@@ -1,4 +1,4 @@
-function npp_surface(pp, dpath, fpath, movtspath, npath, platform, float_ids)
+function npp_surface(pp, dpath, fpath, movtspath, npath, platform, float_ids, matchup_type, chl_correction)
 %Program to calculate NPP using the satellite algorithm (CbPM)
 %with input data:
 % Chl and bbp (from satellite obs - 8 days averaged)
@@ -20,8 +20,14 @@ function npp_surface(pp, dpath, fpath, movtspath, npath, platform, float_ids)
 %   calculation
 %
 % OPTIONAL INPUTS:
-%   float_ids:  array of floats of interest, if not included will compute
-%               for all existing downloaded float data
+%   float_ids:      array of floats of interest, if not included will compute
+%                   for all existing downloaded float data
+%   matchup_types:  specifies matchup type for satellite vaules (closest
+%                   point to float profile, or mean. default is mean.
+%   chl_correction: determine whether to use original float chlorophyll
+%                   values or satellite-corrected values (Y/N). if not
+%                   included will use corrected values
+%
 % Output:
 %   will save calculated NPP as a structure 'snpp', labeld with float ID
 %   1-m binned data from 1 to 200 meters
@@ -35,10 +41,20 @@ function npp_surface(pp, dpath, fpath, movtspath, npath, platform, float_ids)
 % get_doy
 % floatCbPM_JSLV3_2_movTSdata
 
-% Need to define input chl and bbp fields
-bbp_fn1 = 'bp700';
-bbp_fn2 = bbp_fn1;
-chl_fn = 'chla';
+%set matchup type if not specified, default is closest
+if nargin < 8
+    matchup_type = 'med';
+    chl_correction = 'Y';
+end
+
+% Need to define input chl fields
+if strcmp(chl_correction, 'Y')
+    chl_fn = 'chl_corr';
+else
+    chl_fn = 'chla';
+end
+null = 1;
+
 
 %% Load data
 % Load data
@@ -62,7 +78,6 @@ load([pp '/input/input_for_sat_comparison/zno3_monthly_clim.mat'])
 Z = zno3; clear zno3
 
 %%  Loop through all floats and each profile
-null = 1;
 for i = 1:length(float_ids)
     % What float are we on?
     if isa(float_ids, 'cell') %floats are listed in cell array if taken from directory
@@ -71,63 +86,93 @@ for i = 1:length(float_ids)
         floatID = num2str(float_ids(i));
     end  
     f = load([fpath floatID '.mat']); %Load full profile data ("f" struct)
-    load([dpath floatID '_depavg_data.mat']); %Load MLD data ("mldmean" and "mldstd" structs)
-    uf = load([movtspath floatID '.mat']); %Load movTS satellite data ("uf" struct)
-    
-    [prof profidx] = unique(f.profile);
+    load([dpath floatID '_depavg_data.mat'],'mldmean','odmean','zeumean'); %Load depth-avged data 
+    if strcmp(platform, 'sat')
+        uf = load([movtspath floatID '.mat']); %Load movTS satellite data ("uf" struct)
+    end
+    [prof, ~] = unique(f.profile);
     %% Loop through Profiles
-    for p = 1:length(uf.profile)
-        % Current idx of full profile data, if needed:
-        current_idx = find(f.profile == prof(p));
-        % Get PAR data (same for both float & satellite estimate)
-        clear irr; irr = uf.par(p);
-        
-        % Get general info of this profile from the float obs data
-        plat = f.lat(p);
-        plon = f.lon(p);
-        pdate = f.date(p);
-        
-        % Find daylength at this latitude and DOY
+    for p = 1:width(f.profile)
         if strcmp(platform, 'sat') % For satellite data:
+            %Determine closest point for satellite estimates
+            clear closest_idx;
+            [~,closest_idx] = min(distance(uf.lat(p),uf.lon(p),uf.match.lat(:,p),...
+            uf.match.lon(:,p)));
+            pdate = uf.match.date(p);
+             % Lat/Lon pair & Find daylength at this latitude and DOY 
+            if strcmp(matchup_type,'closest')
+                plat = uf.match.lat(closest_idx,p);
+                plon =  uf.match.lon(closest_idx,p); 
+            elseif strcmp(matchup_type,'mean')
+                plat = uf.lat(p);
+                plon = uf.lon(p);
+            end
             [~, moidx, ~, doy] = get_doy(pdate);
             daylength = day_length(doy,plat);
+            
 
         elseif strcmp(platform, 'float') % For float data:
+            plat = f.lat(p);
+            plon = f.lon(p);
+            pdate = f.date(p);
             [~, moidx, ~, doy] = get_doy(odmean.date(p));
-            plat = odmean.lat(p); %serving posvec purpose
             daylength = day_length(doy,plat);
+        end
+
+        %% PAR
+        if strcmp(platform, 'float') %For float data:
+            clear irr;
+            % if isfield(f,'irr_int')
+            %     if p < length(odmean.irr_int)
+            %         irr = odmean.irr_int(p);
+            %     else 
+            %         irr = NaN;
+            %     end
+            % else
+                if length(f.par)>1 && p<length(f.par)+1
+                    irr = f.par(p);
+                else
+                    irr = NaN;
+                end
+            %end
+
+        elseif strcmp(platform, 'sat') % For satellite data
+            if strcmp(matchup_type,'closest')
+                clear irr; irr= uf.par(closest_idx,p);
+            elseif strcmp(matchup_type,'mean')
+                clear irr; irr= mean(uf.par(:,p),'omitnan');
+            end
         end
         %% MLD
         % 7/25/22 changed to using float MLD b/c HYCOM dataset ends in 2020
-        % MLD found using Holte & Talley method
-        mld = mldmean.mld(p);
-
-%         if strcmp(platform, 'float') %For float data:
-%         % This is Holte & Talley method (also westberry option?)
-%             mld = mldmean.mld(p);
-%         
-%         elseif strcmp(platform, 'sat') % For satellite data:
+        % MLD found using de Boyer & Montegut method
+        mld = f.mld(1,p);
+   
+%         strcmp(platform, 'sat') % For satellite data:
 %         % Get MLD estimate from HYCOM data ('M') & Interpolate to lat lon and date of this profile
 %           mld = interp3(M.lon, M.lat, M.date, M.mld, plon, plat, pdate); %DOESN'T WORK WHEN FLOAT DATE > HYCOM (see HYCOM_MLD_dataupdate.mat)
-%         end
         %% OD
         od = odmean.od(p);
-        zvec = [1:1:round(od)]';
+        zvec = (1:1:round(od))';
         %% Zno3
         if strcmp(platform, 'float') %For float data:
-            % Zno3 depth is defined as the depth where nitrate + nitrite exceeded 0.5 uM
-            % 0.5 umol/L * rho => umol/kg
-            % gsw_rho returns kg/m => /1000 => L
-            clear frho; frho = sw_dens(f.sal(current_idx),f.temp(current_idx),f.press(current_idx))./1000;
-            clear tmpno3; tmpno3 = (f.no3(current_idx) ./ frho); %Now in uM
-            % In this region, I think with this definition of the
-            % nitracline, we are always below it (e.g., surface values are
-            % always >0.5uM
-            clear tmpidx; tmpidx = find(tmpno3 >= 0.5,1,'last');
-            if ~isempty(tmpidx)
-                clear zno3; zno3 = find(f.press(current_idx(tmpidx)));
-            else %use previous zno3 profile value as estimate
-                disp(['No Zno3 found at profile ' num2str(p) ' float ' floatID])
+            if isfield(f,'no3') && ~isnan(sum(f.no3(:,p)))
+                % Zno3 depth is defined as the depth where nitrate + nitrite exceeded 0.5 uM
+                % 0.5 umol/L * rho => umol/kg
+                % gsw_rho returns kg/m => /1000 => L
+                clear frho; frho = sw_dens(f.sal(:,p),f.temp(:,p),f.press(:,p))./1000;
+                clear tmpno3; tmpno3 = (f.no3(:,p) ./ frho); %Now in uM
+                % In this region, I think with this definition of the
+                % nitracline, we are always below it (e.g., surface values are
+                % always >0.5uM
+                clear tmpidx; tmpidx = find(tmpno3 >= 0.5,1,'last');
+                if ~isempty(tmpidx)
+                    clear zno3; zno3 = find(f.press(tmpidx,p));
+                else %use previous zno3 profile value as estimate
+                    disp(['No Zno3 found at profile ' num2str(p) ' float ' floatID])
+                end
+            else
+                zno3 = interp2(Z.lon,Z.lat,Z.data(:,:,moidx), plon, plat);
             end
         
         elseif strcmp(platform, 'sat') %For satellite data:
@@ -137,49 +182,28 @@ for i = 1:length(float_ids)
         end
         %% Chl
         if strcmp(platform, 'float') %For float data:
-            %Chl = odmean.est_chla(p); 
-            
-            %Changing to extrapolating Chl to surface, interpolating to 1-m bins and averaging...
-            %Surface-most not NaN value,
-            clear CHLsurf_idx; CHLsurf_idx = find(~isnan(f.(chl_fn)(current_idx)),1,'last');
-            if isempty(CHLsurf_idx) %then the whole profile is NaN
-                Chl = NaN;
+            if strcmp(chl_correction,'Y')
+                Chl = odmean.(chl_fn).(matchup_type)(p); 
             else
-                % Add it to chl vector
-                clear tmp; tmp = [f.(chl_fn)(current_idx);f.(chl_fn)(current_idx(CHLsurf_idx))];
-                tmpP = [f.press(current_idx); 1];
-                % Interpolate to 1-m bins
-                Chl_OD = interp1(tmpP, tmp,zvec);
-                Chl_OD(Chl_OD < 0) = 0;
-                Chl = nanmean(Chl_OD);
+                Chl = odmean.(chl_fn)(p);
             end
-        
         elseif strcmp(platform, 'sat') %For satellite data:
-            Chl = uf.chlor_a(p);
+            if strcmp(matchup_type,'closest')
+                clear Chl; Chl= uf.chlor_a(closest_idx,p);
+            elseif strcmp(matchup_type,'mean')
+                clear Chl; Chl= mean(uf.chlor_a(:,p),'omitnan');
+            end
         end
         %% Bbp
         if strcmp(platform, 'float') % For float data
-            %bbp700 = odmean.bbp_tot(p);
-        
-            % Changing to extrapolating Bbp to surface, interpolating to 1-m bins and averaging...
-            clear BBPsurf_idx; BBPsurf_idx = find(~isnan(f.(bbp_fn1)(current_idx)),1,'last');
-            if isempty(BBPsurf_idx) %then the whole profile is NaN
-                bbp = NaN;
-            elseif isnan(nansum(f.(bbp_fn2)(current_idx)))
-                bbp = NaN;
-            else
-                clear BBPsurf_val; BBPsurf_val = f.(bbp_fn1)(current_idx(BBPsurf_idx));
-                % Add it to chl vector
-                clear tmp; tmp = [f.(bbp_fn2)(current_idx);BBPsurf_val];
-                tmpidx = find(~isnan(tmp));
-                bbp700_OD = interp1(tmpP(tmpidx), tmp(tmpidx),zvec);
-                %Calculate bbp 443 from 700 > if using CbPM relationship (also Graff option)
-                bbp_OD = bbp700_OD.*(443/700).^-1;  %Assume lambda^-1 dependence of scattering
-                bbp = nanmean(bbp_OD);
-            end
+            bbp = odmean.bbp700(p)*(443/700)^-1;
         
         elseif strcmp(platform, 'sat') %For satellite data:
-            bbp = uf.bbp_443_gsm(p);
+            if strcmp(matchup_type,'closest')
+                clear bbp; bbp= uf.bbp_443(closest_idx,p);
+            elseif strcmp(matchup_type,'mean')
+                clear bbp; bbp= mean(uf.bbp_443(:,p),'omitnan');
+            end
         end
         %% Kd
         if strcmp(platform, 'float') %For float data:
@@ -189,10 +213,15 @@ for i = 1:length(float_ids)
             k490(k490<0.0224) = 0.0224;  % Kd490 can't be less than pure-water minimum; Austin & Petzold, L&W Table 3.16
 
         elseif strcmp(platform, 'sat') %For satellite data:
-         k490 = uf.Kd_490(p);
+            k490 = uf.Kd_490(closest_idx,p);
+            if strcmp(matchup_type,'closest')
+                clear k490; k490= uf.Kd_490(closest_idx,p);
+            elseif strcmp(matchup_type,'mean')
+                clear k490; k490= mean(uf.Kd_490(:,p),'omitnan');
+            end
         end
         %% Calculate NPP
-        if (mld > 0) && ~isnan(Chl) && ~isnan(irr)  && ~isnan(k490) && ~isnan(bbp)
+        if (mld > 1) && ~isnan(Chl) && ~isnan(irr)  && ~isnan(k490) && ~isnan(bbp)
             
             clear out; [out] = floatCbPM_JSLV3_2_movTSdata(mld,Chl,bbp,k490,zno3,irr,daylength);
 
@@ -204,13 +233,14 @@ for i = 1:length(float_ids)
             snpp.chlz(:,p) = out.chlz;
             snpp.PhytC(:,p) = out.carbon;
             snpp.ChlC(:,p) = out.chl_C;
+            snpp.parz(:,p) = out.parz;
             snpp.Igrid(:,p) = out.parz;
             snpp.prcnt(:,p) = out.prcnt;
-            snpp.mld([1:200],p) = mld;
-            snpp.od([1:200],p) = odmean.od(p);
-            snpp.zeu([1:200],p) = zeumean.zeu(p);
-            snpp.lat([1:200],p) = mldmean.lat(p);
-            snpp.lon([1:200],p) = mldmean.lon(p);
+            snpp.mld(1:200,p) = mld;
+            snpp.od(1:200,p) = odmean.od(p);
+            snpp.zeu(1:200,p) = zeumean.zeu(p);
+            snpp.lat(1:200,p) = mldmean.lat(p);
+            snpp.lon(1:200,p) = mldmean.lon(p);
             
             %Sensitivity Analysis
 %             perturb = {'Chl','bbp','label';1.5,1,'A';2,1,'B';4,1,'C';1,1.5,'A';1,2,'B';1,4,'C'};
@@ -224,7 +254,21 @@ for i = 1:length(float_ids)
 %             end
             
         else %MLD is 0 so not calculating NPP
-            disp([floatID ' profile ' num2str(p) ', MLD = 0 or ODchl = NaN']);
+            %organize into array to assign bad variable to profile
+            if ~nansum(Chl)>0
+                snpp.bad_var(p,:) = {prof(p),'Chl'};
+            elseif isnan(irr)
+                snpp.bad_var(p,:) = {prof(p),'irr'};
+            elseif isnan(k490)
+                snpp.bad_var(p,:) = {prof(p),'kd490'};
+            elseif ~nansum(bbp)>0
+                snpp.bad_var(p,:) = {prof(p),'bbp'};
+            elseif isnan(mld)
+                    snpp.bad_var(p,:) = {prof(p),'mld'};
+            else
+                snpp.bad_var(p,:) = {prof(p),'something else'};
+            end   
+            %disp(['For float ' floatID ' profile ' num2str(prof(p)) ' one of the input vars is NaN - ',char(snpp.(matchup_type).bad_var(p,2))]);
             null = 0;
         end
         
@@ -236,21 +280,41 @@ for i = 1:length(float_ids)
             snpp.chlz(:,p) = NaN.*ones(200,1);
             snpp.PhytC(:,p) = NaN;%.*ones(200,1);
             snpp.ChlC(:,p) = NaN.*ones(200,1);
+            snpp.parz(:,p) = NaN.*ones(200,1);
             snpp.Igrid(:,p) = NaN.*ones(200,1);
             snpp.prcnt(:,p) = NaN.*ones(200,1);
-            snpp.mld([1:200],p) = NaN;
-            snpp.od([1:200],p) = NaN;
-            snpp.zeu([1:200],p) = NaN;
-            snpp.lat([1:200],p) = NaN;
-            snpp.lon([1:200],p) = NaN;
+            snpp.mld(1:200,p) = NaN;
+            snpp.od(1:200,p) = NaN;
+            snpp.zeu(1:200,p) = NaN;
+            snpp.lat(1:200,p) = NaN;
+            snpp.lon(1:200,p) = NaN;
         else
         end
-        snpp.date([1:200],p) = odmean.date(p);
+        snpp.date(1:200,p) = odmean.date(1,p);
         null = 1; %reset null
     end
+        snpp.info = {['Float ID: ' floatID]; ...
+        ['Data processed on ' datestr(now)]; ...
+        ['Float data time range = ' datestr(min(min(odmean.date))) ' to ' datestr(max(max(odmean.date)))];...
+        ['Matchup method= ' matchup_type]};
+
     %% Save npp data
-    isfolder(npath);
-    save([npath floatID '_' platform '_surface_CbPM.mat'],'-struct','snpp');
+    % isfolder(npath);
+    % if isfile([npath floatID '_' platform '_surface_CbPM.mat'])
+    %     save([npath floatID '_' platform '_surface_CbPM.mat'],'-struct','snpp','-append');
+    % else
+    if strcmp(chl_correction,'Y') 
+        tmp = platform;
+    else
+        tmp = [platform '_uncorr'];
+    end
+
+    % if isfield(f,'irr_int')
+    %     save([npath floatID '_' tmp '_irr_surface_CbPM.mat'],'-struct','snpp');
+    % else
+        save([npath floatID '_' tmp '_surface_CbPM.mat'],'-struct','snpp');
+   % end
+    %end
     
     clear snpp mldmean mldstd floatID od_files_char odmean odstd profile_num
 end
